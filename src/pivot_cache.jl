@@ -43,6 +43,7 @@ function pivot_cache(
     #    we want Y[P] == 0, X[P] >= 0
     #    we want X[~P]== 0, Y[~P] >= 0
     P = falses(q)
+    inactive = trues(q)
 
     ginf = isempty(AtA) ? zero(tol) : opnorm(AtA, Inf)
     cinf = norm(Atb, Inf)
@@ -70,7 +71,7 @@ function pivot_cache(
                 # backup rule
                 i = findlast(V)
                 if i !== nothing
-                    V = falses(q)
+                    fill!(V, false)
                     V[i] = true
                 else
                     error("V had no true values")
@@ -82,13 +83,14 @@ function pivot_cache(
         #     P & ~V removes infeasible variables from P
         #     V & ~P  moves infeasible variables in ~P to P
         @. P = (P & !V) | (V & !P)
+        @. inactive = !P
 
         # update primal/dual variables
         if !all(!, P)
             x[P] = _get_primal_dual(AtA, Atb, P)
         end
         #x[(!).(P)] = 0.0
-        y[(!).(P)] = AtA[(!).(P),P]*x[P] - Atb[(!).(P)]
+        y[inactive] = AtA[inactive,P]*x[P] - Atb[inactive]
         #y[P] = 0.0
 
         # check infeasibility
@@ -97,7 +99,7 @@ function pivot_cache(
         nV = sum(V)
     end
 
-    x[(!).(P)] .= zero(eltype(x))
+    x[inactive] .= zero(eltype(x))
     return x
 end
 
@@ -137,12 +139,12 @@ function pivot_cache(
     if use_parallel && k > 1 && Threads.nthreads() > 1
         let AtA = AtA, AtB = AtB     # julia#15276
             Threads.@threads for i = 1:k
-                X[:,i] = pivot_cache(AtA, AtB[:,i]; kwargs...)
+                X[:,i] = pivot_cache(AtA, view(AtB,:,i); kwargs...)
             end
         end
     else
         for i = 1:k
-            X[:,i] = pivot_cache(AtA, AtB[:,i]; kwargs...)
+            X[:,i] = pivot_cache(AtA, view(AtB,:,i); kwargs...)
         end
     end
 

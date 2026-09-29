@@ -41,7 +41,8 @@ function pivot(A,
     # Store indices for the passive set, P
     #    we want Y[P] == 0, X[P] >= 0
     #    we want X[~P]== 0, Y[~P] >= 0
-    P = BitArray(false for _ in 1:q)
+    P = falses(q)
+    inactive = trues(q)
 
     # Scale primal and dual tolerances separately; their units differ.
     aone = isempty(A) ? zero(tol) : opnorm(A, 1)
@@ -71,7 +72,7 @@ function pivot(A,
                 # backup rule
                 i = findlast(V)
                 if i !== nothing
-                    V = falses(q)
+                    fill!(V, false)
                     V[i] = true
                 else
                     error("V had no true values")
@@ -83,12 +84,13 @@ function pivot(A,
         #     P & ~V removes infeasible variables from P
         #     V & ~P  moves infeasible variables in ~P to P
         @. P = (P & !V) | (V & !P)
+        @. inactive = !P
 
         # update primal/dual variables
         if !all(!, P)
             x[P] =  A[:,P] \ b
         end
-        y[(!).(P)] =  A[:,(!).(P)]' * ((A[:,P]*x[P]) - b)
+        y[inactive] =  A[:,inactive]' * ((A[:,P]*x[P]) - b)
 
         # check infeasibility
         (; tolx, toly) = _pivot_tolerances(x, P, aone, ainf, binf, tol, rtol)
@@ -96,7 +98,7 @@ function pivot(A,
         nV = sum(V)
     end
 
-    x[(!).(P)] .= zero(eltype(x))
+    x[inactive] .= zero(eltype(x))
     return x
 end
 
@@ -141,11 +143,11 @@ function pivot(A,
     X = Array{T}(undef,n,k)
     if use_parallel && k > 1 && Threads.nthreads() > 1
         Threads.@threads for i = 1:k
-            X[:,i] = pivot(A, B[:,i]; kwargs...)
+            X[:,i] = pivot(A, view(B,:,i); kwargs...)
         end
     else
         for i = 1:k
-            X[:,i] = pivot(A, B[:,i]; kwargs...)
+            X[:,i] = pivot(A, view(B,:,i); kwargs...)
         end
     end
 

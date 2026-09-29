@@ -52,6 +52,7 @@ function pivot_comb(
     # Update primal and dual variables
     cssls!(AtA, AtB, X, P!) # overwrite X[P]
     Y = AtA*X - AtB
+    TY = eltype(Y)
 
     # identify infeasible columns of X
     infeasible_cols = Array{Bool}(undef,size(X,2))
@@ -76,7 +77,8 @@ function pivot_comb(
 
         # check progress
         for j = 1:r
-            nV = sum(V[:,j])
+            violations = view(V,:,j)
+            nV = sum(violations)
 
             # skip any column with no infeasible variables
             if nV == 0
@@ -93,8 +95,8 @@ function pivot_comb(
                     α[j] = α[j]-1 # tolerate increases for α cycles
                 else
                     # backup rule
-                    i = findlast(V[:,j])
-                    V[:,j] = zeros(Bool,q)
+                    i = findlast(violations)
+                    fill!(violations, false)
                     V[i,j] = true
                 end
             end
@@ -107,9 +109,9 @@ function pivot_comb(
 
         # Update primal and dual variables
         cssls!(AtA, AtB, X, P!) # overwrite X[P]
-        X[(!).(P!)] .= 0.0
+        @. X = ifelse(P!, X, zero(T))
         Y[:,infeasible_cols] = AtA*X[:,infeasible_cols] - AtB[:,infeasible_cols]
-        Y[P!] .= 0.0
+        @. Y = ifelse(P!, zero(TY), Y)
 
         # identify infeasible columns of X
         @inbounds for j in 1:r
@@ -120,6 +122,6 @@ function pivot_comb(
         any!(infeasible_cols, V') # collapse each column
     end
 
-    X[(!).(P!)] .= 0.0
+    @. X = ifelse(P!, X, zero(T))
     return X
 end
