@@ -68,6 +68,14 @@ function pivot_comb(
     end
     V = @. (P! & (X < -tolx)) | (!(P!) & (Y < -toly)) # infeasible variables
     any!(infeasible_cols, V') # collapse each column
+    if !any(infeasible_cols)
+        return X
+    end
+
+    # Pack only unfinished RHS columns into reusable, contiguous product buffers.
+    n_pending = count(infeasible_cols)
+    Xwork = similar(X, q, n_pending)
+    Ywork = similar(Y, q, n_pending)
 
     # while infeasible
     iter = 0
@@ -110,7 +118,26 @@ function pivot_comb(
         # Update primal and dual variables
         cssls!(AtA, AtB, X, P!) # overwrite X[P]
         @. X = ifelse(P!, X, zero(T))
-        Y[:,infeasible_cols] = AtA*X[:,infeasible_cols] - AtB[:,infeasible_cols]
+        n_pending = count(infeasible_cols)
+        if n_pending > size(Xwork,2)
+            Xwork = similar(X, q, n_pending)
+            Ywork = similar(Y, q, n_pending)
+        end
+        pending = 0
+        for j in 1:r
+            if infeasible_cols[j]
+                pending += 1
+                copyto!(view(Xwork,:,pending), view(X,:,j))
+            end
+        end
+        mul!(view(Ywork,:,1:pending), AtA, view(Xwork,:,1:pending))
+        pending = 0
+        for j in 1:r
+            if infeasible_cols[j]
+                pending += 1
+                @views @. Y[:,j] = Ywork[:,pending] - AtB[:,j]
+            end
+        end
         @. Y = ifelse(P!, zero(TY), Y)
 
         # identify infeasible columns of X

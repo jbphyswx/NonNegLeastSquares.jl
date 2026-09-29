@@ -42,7 +42,6 @@ function pivot(A,
     #    we want Y[P] == 0, X[P] >= 0
     #    we want X[~P]== 0, Y[~P] >= 0
     P = falses(q)
-    inactive = trues(q)
 
     # Scale primal and dual tolerances separately; their units differ.
     aone = isempty(A) ? zero(tol) : opnorm(A, 1)
@@ -53,6 +52,10 @@ function pivot(A,
     # identify indices of infeasible variables
     V = @. (P & (x < -tolx)) | (!P & (y < -toly))
     nV = sum(V)
+    if nV == 0
+        return x
+    end
+    residual = Vector{eltype(y)}(undef, size(A,1))
 
     # while infeasible (number of infeasible variables > 0)
     iter = 0
@@ -84,13 +87,17 @@ function pivot(A,
         #     P & ~V removes infeasible variables from P
         #     V & ~P  moves infeasible variables in ~P to P
         @. P = (P & !V) | (V & !P)
-        @. inactive = !P
 
         # update primal/dual variables
         if !all(!, P)
-            x[P] =  A[:,P] \ b
+            AP = A[:,P]
+            x[P] = AP \ b
+            mul!(residual, AP, x[P])
+        else
+            fill!(residual, zero(eltype(residual)))
         end
-        y[inactive] =  A[:,inactive]' * ((A[:,P]*x[P]) - b)
+        residual .-= b
+        mul!(y, A', residual)
 
         # check infeasibility
         (; tolx, toly) = _pivot_tolerances(x, P, aone, ainf, binf, tol, rtol)
@@ -98,7 +105,7 @@ function pivot(A,
         nV = sum(V)
     end
 
-    x[inactive] .= zero(eltype(x))
+    @. x = ifelse(P, x, zero(T))
     return x
 end
 

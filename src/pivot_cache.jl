@@ -43,7 +43,6 @@ function pivot_cache(
     #    we want Y[P] == 0, X[P] >= 0
     #    we want X[~P]== 0, Y[~P] >= 0
     P = falses(q)
-    inactive = trues(q)
 
     ginf = isempty(AtA) ? zero(tol) : opnorm(AtA, Inf)
     cinf = norm(Atb, Inf)
@@ -83,15 +82,15 @@ function pivot_cache(
         #     P & ~V removes infeasible variables from P
         #     V & ~P  moves infeasible variables in ~P to P
         @. P = (P & !V) | (V & !P)
-        @. inactive = !P
 
         # update primal/dual variables
         if !all(!, P)
             x[P] = _get_primal_dual(AtA, Atb, P)
         end
-        #x[(!).(P)] = 0.0
-        y[inactive] = AtA[inactive,P]*x[P] - Atb[inactive]
-        #y[P] = 0.0
+        # The full Gram product must not include stale inactive coefficients.
+        @. x = ifelse(P, x, zero(T))
+        mul!(y, AtA, x)
+        y .-= Atb
 
         # check infeasibility
         (; tolx, toly) = _pivot_tolerances(x, P, one(ginf), ginf, cinf, tol, rtol)
@@ -99,7 +98,6 @@ function pivot_cache(
         nV = sum(V)
     end
 
-    x[inactive] .= zero(eltype(x))
     return x
 end
 
