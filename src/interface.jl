@@ -21,7 +21,13 @@ Optional arguments
 
 `tol:` tolerance for nonnegativity constraints
 
-`max_iter:` maximum number of iterations before function gives up
+`rtol:` relative roundoff allowance for the pivot variants, added to `tol`
+using separate primal and dual scales (see `pivot` and `pivot_cache`).
+Set `rtol=0` for absolute-only tolerances.
+
+`max_iter:` maximum number of iterations before function gives up.
+For pivot variants, counts pivot passes (batches of swaps for `:comb`) and
+throws an error on exhaustion; zero permits an already feasible initial solution.
 
 `use_parallel`: use threading if `B` has multiple columns and `Threads.nthreads() > 1`.
 """

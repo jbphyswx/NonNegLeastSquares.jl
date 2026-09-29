@@ -7,7 +7,12 @@ in Kim & Park (2011).
 
 Optional arguments:
 * `tol`: tolerance for nonnegativity constraints; default: `1e-8`
-* `max_iter`: maximum number of iterations; default: `30*size(A,2)`
+* `rtol`: relative roundoff allowance; default: `8*max(size(A)...,1)*eps(T)`.
+ Uses separate primal/dual thresholds as in `pivot_cache`, independently for
+ each RHS column. Set `rtol=0` for absolute-only tolerances.
+* `max_iter`: maximum number of batches of pivot swaps; default: `30*size(A,2)`.
+ Throws an error on exhaustion. The initial warm-start solve is not a pivot
+ pass, so an already feasible initial solution may return with `max_iter=0`.
 * `P!`: initial guess of passive set; default: `falses(size(A,2), size(B,2))`
 Alert: this optional argument, if provided, is mutated to become the final passive set.
 
@@ -20,9 +25,11 @@ function pivot_comb(
     A,
     B::AbstractMatrix{T};
     tol::Float64=1e-8,
+    rtol::Real=_pivot_default_rtol(A, B),
     max_iter=30*size(A,2),
     P!::AbstractMatrix{Bool} = falses(size(A,2), size(B,2)),
 ) where {T}
+    _pivot_check_options(tol, rtol, max_iter)
 
     # precompute constant portion of pseudoinverse
     AtA = A'*A
@@ -49,11 +56,23 @@ function pivot_comb(
     # identify infeasible columns of X
     infeasible_cols = Array{Bool}(undef,size(X,2))
 
-    V = @. (P! & (X < -tol)) | (!(P!) & (Y < -tol)) # infeasible variables
+    ginf = isempty(AtA) ? zero(tol) : opnorm(AtA, Inf)
+    cinf = [norm(view(AtB,:,j), Inf) for j in 1:r]
+    # Row matrices broadcast one threshold per RHS, not one for the whole batch.
+    tolx = zeros(promote_type(T, typeof(tol), typeof(rtol)), 1, r)
+    toly = similar(tolx)
+    for j in 1:r
+        tolx[j], toly[j] = _pivot_tolerances(view(X,:,j), view(P!,:,j),
+            one(ginf), ginf, cinf[j], tol, rtol)
+    end
+    V = @. (P! & (X < -tolx)) | (!(P!) & (Y < -toly)) # infeasible variables
     any!(infeasible_cols, V') # collapse each column
 
     # while infeasible
+    iter = 0
     while any(infeasible_cols)
+        iter >= max_iter && error("pivot_comb failed to converge within max_iter=$max_iter pivot passes")
+        iter += 1
 
         # check progress
         for j = 1:r
@@ -93,7 +112,11 @@ function pivot_comb(
         Y[P!] .= 0.0
 
         # identify infeasible columns of X
-        @. V = (P! & (X < -tol)) | (!(P!) & (Y < -tol)) # infeasible variables
+        @inbounds for j in 1:r
+            tolx[j], toly[j] = _pivot_tolerances(view(X,:,j), view(P!,:,j),
+                one(ginf), ginf, cinf[j], tol, rtol)
+        end
+        @. V = (P! & (X < -tolx)) | (!(P!) & (Y < -toly)) # infeasible variables
         any!(infeasible_cols, V') # collapse each column
     end
 

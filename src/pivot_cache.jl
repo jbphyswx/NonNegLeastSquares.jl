@@ -8,7 +8,12 @@ Optional arguments:
 * `tol` tolerance for nonnegativity constraints;
  default for `AbstractFloat` types is `10^floor(log10(eps(T)^0.5))`,
  which is `1e-8` for `Float64`, otherwise reverts to `1e-8`.
-* `max_iter` maximum number of iterations, default `30 * size(A,2)`
+* `rtol` relative roundoff allowance, default `8*max(size(AtA)...,1)*eps(T)`.
+ The primal threshold is `tol + rtol*norm(x[P],Inf)` and the dual threshold is
+ `tol + rtol*(opnorm(AtA,Inf)*norm(x[P],Inf) + norm(Atb,Inf))`.
+ Set `rtol=0` for absolute-only tolerances.
+* `max_iter` maximum number of pivot passes, default `30 * size(A,2)`;
+ throws an error on exhaustion. Zero permits only an already feasible initial solution.
 
 References:
     J. Kim and H. Park, Fast nonnegative matrix factorization: An
@@ -19,8 +24,10 @@ function pivot_cache(
     AtA,
     Atb::AbstractVector{T};
     tol::Real = (real(T) <: AbstractFloat) ? 10^floor(log10(eps(real(T))^0.5)) : 1e-8,
+    rtol::Real = _pivot_default_rtol(AtA, Atb),
     max_iter=30 * size(AtA,2),
 ) where {T}
+    _pivot_check_options(tol, rtol, max_iter)
 
     # dimensions, initialize solution
     q = size(AtA,1)
@@ -37,12 +44,19 @@ function pivot_cache(
     #    we want X[~P]== 0, Y[~P] >= 0
     P = falses(q)
 
+    ginf = isempty(AtA) ? zero(tol) : opnorm(AtA, Inf)
+    cinf = norm(Atb, Inf)
+    (; tolx, toly) = _pivot_tolerances(x, P, one(ginf), ginf, cinf, tol, rtol)
+
     # identify indices of infeasible variables
-    V = @. (P & (x < -tol)) | (!P & (y < -tol))
+    V = @. (P & (x < -tolx)) | (!P & (y < -toly))
     nV = sum(V)
 
     # while infeasible (number of infeasible variables > 0)
+    iter = 0
     while nV > 0
+        iter >= max_iter && error("pivot_cache failed to converge within max_iter=$max_iter pivot passes")
+        iter += 1
 
         if nV < β
             # infeasible variables decreased
@@ -78,7 +92,8 @@ function pivot_cache(
         #y[P] = 0.0
 
         # check infeasibility
-        @. V = (P & (x < -tol)) | (!P & (y < -tol))
+        (; tolx, toly) = _pivot_tolerances(x, P, one(ginf), ginf, cinf, tol, rtol)
+        @. V = (P & (x < -tolx)) | (!P & (y < -toly))
         nV = sum(V)
     end
 
