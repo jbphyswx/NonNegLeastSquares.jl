@@ -127,6 +127,7 @@ end
 
 @testset "NNLS" begin include("nnls_test.jl") end
 @testset "Native references" begin include("native_reference_test.jl") end
+@testset "Interface" begin include("interface_test.jl") end
 @testset "FNNLS" begin include("fnnls_test.jl") end
 @testset "Pivot" begin include("pivot_test.jl") end
 @testset "Pivot termination" begin include("pivot_termination_test.jl") end

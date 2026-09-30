@@ -16,14 +16,28 @@ The arguments `A` and `B` are respectively (m × k) and (m × n) matrices, so `X
 
 ### Currently Implemented Algorithms:
 
-The code defaults to the "Pivot Method" algorithm.
-To specify a different algorithm, use the keyword argument `alg`. Currently implemented algorithms are:
+The default is direct block pivoting. Select an algorithm using `alg` or a
+positional algorithm object:
+
+```julia
+using NonNegLeastSquares
+
+nonneg_lsq(A,b; alg=LawsonHanson())
+nonneg_lsq(A,b; alg=FastNNLS())
+nonneg_lsq(A,b; alg=Pivot())
+nonneg_lsq(A,b; alg=Pivot(CachedPivot()))
+nonneg_lsq(A,b; alg=Pivot(GroupedPivot()))
+nonneg_lsq(A,b; alg=DeviationMaximization()) # LHDM
+nonneg_lsq(A,b,Pivot(CachedPivot()))
+```
+
+The existing symbol API remains supported:
 
 ```julia
 nonneg_lsq(A,b;alg=:nnls)  # NNLS
 nonneg_lsq(A,b;alg=:fnnls) # Fast NNLS
 nonneg_lsq(A,b;alg=:pivot) # Pivot Method
-nonneg_lsq(A,b;alg=:pivot,variant=:cache) # Pivot Method (cache pseudoinverse up front)
+nonneg_lsq(A,b;alg=:pivot,variant=:cache) # Pivot Method (cache Gram matrices)
 nonneg_lsq(A,b;alg=:pivot,variant=:comb) # Pivot Method with combinatorial least-squares
 nonneg_lsq(A,b;alg=:lhdm)  # LHDM
 ```
@@ -34,13 +48,58 @@ Default algorithm:
 nonneg_lsq(A,b) # pivot method
 ```
 
-The keyword `Gram` specifies whether the inputs are Gram matrices (as shown in the examples below).
+The keyword `gram` specifies whether the inputs are Gram matrices (as shown in the examples below).
 This defaults to `false`.
 
 ```julia
 nonneg_lsq(A'*A,A'*b;alg=:nnls,gram=true) # NNLS
 nonneg_lsq(A'*A,A'*b;alg=:fnnls,gram=true) # Fast NNLS
+nonneg_lsq(A'*A,A'*b;alg=:pivot,gram=true) # Cached pivot
+solve_nnls(NNLSGram(A'*A,A'*b),Pivot(CachedPivot()))
 ```
+
+Typed algorithms keep their stated method: `Pivot()` and `LawsonHanson()` require
+original data. For Gram input use `Pivot(CachedPivot())` or `FastNNLS()`.
+If `alg` is omitted, the default is `Pivot(CachedPivot())` for Gram input and
+`Pivot()` otherwise. The legacy symbol adapter translates `:nnls` to fast NNLS
+and `:pivot` to cached pivot when `gram=true`. Invalid or unsupported combinations
+throw `ArgumentError`. With a typed algorithm, omit `variant` or supply its
+matching value: `:none` for direct pivoting, `:cache` for cached pivoting, or
+`:comb` for grouped pivoting. Other algorithm types accept only `:none`.
+
+All built-in public calls return a matrix, including an `n×1` matrix for a vector
+RHS. `NNLSData(A,B)` and `NNLSGram(G,C)` retain references to the supplied arrays
+without copying or factoring them. Existing numerical input restrictions and
+solver-specific keywords still apply. In particular, grouped pivoting does not
+accept `use_parallel`, and LHDM's `max_iter` keyword support remains pending.
+
+### Extending algorithms and pivot policies
+
+The public extension points are positional methods of `solve_nnls(problem, alg)`
+and `solve_pivot(problem, policy)`. Downstream packages own their algorithm or
+policy types; they do not register symbols. For example:
+
+```julia
+module MyNNLSExtension
+import NonNegLeastSquares as NN
+
+struct MyPivot <: NN.AbstractPivotVariant end
+function NN.solve_pivot(p::NN.NNLSData, ::MyPivot; kwargs...)
+    # Replace this delegation with your own policy implementation.
+    NN.solve_pivot(p, NN.DirectPivot(); kwargs...)
+end
+end
+
+nonneg_lsq(A,b; alg=Pivot(MyNNLSExtension.MyPivot()))
+```
+
+A new algorithm subtypes `AbstractNNLSAlgorithm` and implements `solve_nnls`.
+Custom problem representations subtype `AbstractNNLSProblem`. Custom matrix
+methods can specialize, for example,
+`solve_pivot(p::NNLSData{<:MyMatrix}, ::DirectPivot; kwargs...)`.
+Specialize both argument types where needed to avoid ambiguity with other
+methods. Return an `n×k` solution matrix and leave the input data unchanged;
+explicit mutable workspaces or warm-start masks may have their own contracts.
 
 ***References***
 * **NNLS**:
@@ -78,7 +137,7 @@ x = nonneg_lsq(A,b)
 Produces:
 
 ```julia
-5-element Array{Float64,1}:
+5×1 Matrix{Float64}:
  2.20104
  1.1901
  0.0
