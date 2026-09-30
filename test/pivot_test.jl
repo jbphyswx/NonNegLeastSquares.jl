@@ -10,8 +10,8 @@ A = [ 0.53879488  0.65816267
 
 b = [0.888,  0.562,  0.255,  0.077]
 
-# Test that nnls produces the same solution as scipy
-x = [0.15512102, 0.69328985] # approx solution from scipy
+# Rounded reference; the shared fixture is also checked by support enumeration.
+x = [0.15512102, 0.69328985]
 @test norm(pivot(A,b)-x) < 1e-5
 
 
@@ -25,17 +25,17 @@ b2 = [-1.6,  0.19,  0.17,  0.31, -1.27]
 x2 = [2.2010416, 1.19009924, 0.0, 1.55001345, 0.0]
 @test norm(pivot(A2,b2)-x2) < 1e-5
 
-## Test a bunch of random cases against python
+## Compare small random problems with an exhaustive objective reference.
 
+Random.seed!(74)
 for i = 1:100
-  	m,n = rand(1:10),rand(1:10)
-  	A3 = randn(m,n)
-  	b3 = randn(m)
-  	x3,resid = pyopt.nnls(A3,b3)
-    resid = norm(b3-A3*pivot(A3,b3))
-    if resid > 1e-5
-        @test norm(pivot(A3,b3)-x3) < 1e-5
-    end
+    m,n = rand(1:10),rand(1:6)
+    A3 = randn(m,n)
+    b3 = randn(m)
+    _,objective = exhaustive_nnls(A3,b3)
+    X = pivot(A3,b3)
+    assert_kkt(A3,b3,X)
+    @test sum(abs2,A3*vec(X)-b3) ≈ objective atol=1e-9 rtol=1e-8
 end
 
 ## Test a bunch of random cases against nnls
@@ -44,8 +44,5 @@ for i = 1:100
     A4 = randn(m,n)
     b4 = randn(m)
     x4 = nnls(A4,b4)
-    resid = norm(b4-A4*pivot(A4,b4))
-    if resid > 1e-5
-        @test norm(pivot(A4,b4)-x4) < 1e-5
-    end
+    @test A4*pivot(A4,b4) ≈ A4*x4 atol=1e-9
 end

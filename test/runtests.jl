@@ -5,8 +5,8 @@ using SparseArrays: sprand
 
 #test specific
 using Random #: seed!
-using PyCall: pyimport_conda
-const pyopt = pyimport_conda("scipy.optimize", "scipy")
+include("test_helpers.jl")
+using .NNLSTestUtils: assert_kkt, exhaustive_nnls
 
 """
 Measure memory allocation within a function to avoid issues
@@ -29,7 +29,7 @@ function test_case1()
           0.80491791  0.32793762 ]
 
     b = [0.888, 0.562, 0.255, 0.077]
-    x = [0.15512102, 0.69328985] # approx solution from scipy
+    x = [0.15512102, 0.69328985] # rounded reference, checked by the native oracle
     return A, b, x
 end
 
@@ -47,11 +47,11 @@ end
 function test_case3() # non-float
     A = ones(Int, 4, 3)
     b = 2*ones(Int, 4)
-    x = 2*ones(Int, 3)
+    x = [2,0,0]
     return A, b, x
 end
 
-function test_algorithm(fh::Function, ε::Real=1e-5; use_parallel=false)
+function test_algorithm(fh::Function, cases, ε::Real=1e-5; use_parallel=false)
     # Solve A*x = b for x, subject to x >=0
     A, b, x = test_case1()
     @test norm(fh(A,b) - x) < ε
@@ -59,25 +59,15 @@ function test_algorithm(fh::Function, ε::Real=1e-5; use_parallel=false)
     A, b, x = test_case2()
     @test norm(fh(A,b) - x) < ε
 
-    # Test a bunch of random cases
-    for i = 1:100
-        m,n = rand(1:10),rand(1:10)
-        A3 = randn(m,n)
-        b3 = randn(m)
-        x3,resid = pyopt.nnls(A3,b3)
-        if resid > ε
-            @test norm(fh(A3,b3; use_parallel) - x3) < ε
-        else
-            @test norm(A3*fh(A3,b3; use_parallel) - b3) < ε
-        end
-        B3 = randn(m, 2)
-        X = fh(A3,B3; use_parallel)
-        for j in axes(B3,2)
-            x3,resid = pyopt.nnls(A3,B3[:,j])
-            if resid > ε
-                @test norm(X[:,j] - x3) < ε
-            else
-                @test norm(A3*X[:,j] - B3[:,j]) < ε
+    for (A,B,objectives) in cases
+        # Exercise vector and matrix entry points on the same random inputs.
+        x = vec(fh(A,B[:,1];use_parallel))
+        X = fh(A,B[:,2:3];use_parallel)
+        @test size(X) == (size(A,2),2)
+        for (j,solution) in enumerate((x,X[:,1],X[:,2]))
+            assert_kkt(A,B[:,j],solution)
+            if objectives !== nothing
+                @test sum(abs2,A*solution-B[:,j]) ≈ objectives[j] atol=1e-9 rtol=1e-8
             end
         end
     end
@@ -95,12 +85,23 @@ lhdm(A,b; use_parallel=false) = nonneg_lsq(A, b; alg=:lhdm, use_parallel)
 algs = [nnls, nnls_gram, fnnls, fnnls_gram, pivot, pivot_comb, pivot_cache, lhdm]
 errs = fill(1e-5, length(algs))
 
+# Generate once so algorithms and threaded/nonthreaded calls see identical data.
+rng = MersenneTwister(51)
+cases = map(1:100) do _
+    m,n = rand(rng,1:10),rand(rng,1:10)
+    A,B = randn(rng,m,n),randn(rng,m,3)
+    objectives = n <= 6 ? [exhaustive_nnls(A,B[:,j])[2] for j in 1:3] : nothing
+    (A,B,objectives)
+end
+
 for use_parallel in (false, true)
     @show use_parallel
     for (f, ε) in zip(algs, errs)
         print("testing ")
         @show f
-        test_algorithm(f, ε; use_parallel)
+        @testset "$(nameof(f)), parallel=$use_parallel" begin
+            test_algorithm(f, cases, ε; use_parallel)
+        end
         println("done")
     end
 end
@@ -125,6 +126,7 @@ end
 end
 
 @testset "NNLS" begin include("nnls_test.jl") end
+@testset "Native references" begin include("native_reference_test.jl") end
 @testset "FNNLS" begin include("fnnls_test.jl") end
 @testset "Pivot" begin include("pivot_test.jl") end
 @testset "Pivot termination" begin include("pivot_termination_test.jl") end

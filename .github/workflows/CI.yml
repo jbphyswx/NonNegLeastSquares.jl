@@ -23,7 +23,6 @@ jobs:
         arch:
           - x64
     env:
-      PYTHON: ""
       JULIA_NUM_THREADS: "auto"
     steps:
       - uses: actions/checkout@v5

@@ -91,7 +91,8 @@ end
         else
             NNLS.nnls!(work, A, b)
         end
-        @test work.x ≈ pyopt.nnls(A, b)[1]
+        assert_kkt(A,b,work.x)
+        @test A*work.x ≈ A*vec(nnls(A,b)) atol=1e-10
     end
 
     m = 20
@@ -100,7 +101,8 @@ end
         A = randn(m, n)
         b = randn(m)
         NNLS.nnls!(work, A, b)
-        @test work.x ≈ pyopt.nnls(A, b)[1]
+        assert_kkt(A,b,work.x)
+        @test A*work.x ≈ A*vec(nnls(A,b)) atol=1e-10
     end
 end
 
@@ -121,7 +123,7 @@ if test_allocs
     end
 end
 
-@testset "nnls vs scipy" begin
+@testset "random optimality conditions" begin
     Random.seed!(5)
     for i in 1:5000
         m = rand(1:60)
@@ -129,7 +131,6 @@ end
         A = randn(m, n)
         b = randn(m)
         x1 = nnls(A, b)
-        x2, residual2 = pyopt.nnls(A, b)
-        @test vec(x1) ≈ x2
+        assert_kkt(A,b,x1)
     end
 end
