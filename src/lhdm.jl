@@ -101,6 +101,7 @@ function lhdm!(work::LHDMWorkspace{T, TI},
                thres_w::Real = 0.6,
                thres_nrm::Real = 0.15,
                thres_cos::Real = 0.9) where {T, TI}
+    max_iter >= 0 || throw(ArgumentError("max_iter must be nonnegative"))
     checkargs(work)
 
     @assert kmax >= 1
@@ -446,14 +447,18 @@ end
 
 """
     x = lhdm(A, b; ...)
+    x = lhdm(A, b, max_iter; ...)
 
 Solves non-negative least-squares (NNLS) problem
 by "Lawson-Hanson algorithm with deviation maximization" (LHDM)
 as published by Dessole et al. in 2023:
 https://doi.org/10.1002/nla.2490
-Optional arguments:
-* `max_iter=3*size(A,2)`: maximum number of iterations (counts inner loop iterations)
 Optional keyword arguments:
+* `max_iter::Integer=3*size(A,2)`: nonnegative limit on inner-loop iterations per RHS.
+  Allocating calls throw if this limit is exhausted; zero permits an initially
+  optimal zero solution. The limit may also be supplied as the third positional
+  argument. Workspace calls `lhdm!(work, max_iter; ...)` report exhaustion through
+  `work.mode == 3` and retain the partial iterate.
 * `use_parallel::Bool=true`: if `b` is a `AbstractMatrix`, parallelizes calls over columns of `b`
 * `kmax=32`: maximum number of indices added at a time (k=1 for standard LH-NNLS)
 * `thres_w=0.6`: threshold factor  on dual vector for addition (between 0 and 1)
@@ -462,17 +467,20 @@ Optional keyword arguments:
 """
 function lhdm(A,
               b::AbstractVector{T},
-              args...; kwargs...) where {T}
+              max_iter::Integer; kwargs...) where {T}
+    max_iter >= 0 || throw(ArgumentError("max_iter must be nonnegative"))
     work = LHDMWorkspace(A, b)
-    lhdm!(work, args...; kwargs...)
+    lhdm!(work, max_iter; kwargs...)
+    _check_convergence(work, max_iter)
     work.x
 end
 
 function lhdm(A,
               B::AbstractMatrix{T},
-              args...;
+              max_iter::Integer;
               use_parallel::Bool = true,
               kwargs...) where {T}
+    max_iter >= 0 || throw(ArgumentError("max_iter must be nonnegative"))
 
     m, n = size(A)
     k = size(B, 2)
@@ -487,7 +495,9 @@ function lhdm(A,
                 colend = min(colstart + chunksize - 1, k)
                 work = LHDMWorkspace{T}(m, n)
                 for col in colstart:colend
-                    X[:,col] = lhdm!(work, A, @view(B[:,col]), args...; kwargs...)
+                    lhdm!(work, A, @view(B[:,col]), max_iter; kwargs...)
+                    _check_convergence(work, max_iter)
+                    X[:,col] = work.x
                 end
             end
         end
@@ -495,11 +505,21 @@ function lhdm(A,
     else
         let work = LHDMWorkspace{T}(m, n)
             for i = 1:k
-                X[:, i] = lhdm!(work, A, @view(B[:,i]), args...; kwargs...)
+                lhdm!(work, A, @view(B[:,i]), max_iter; kwargs...)
+                _check_convergence(work, max_iter)
+                X[:, i] = work.x
             end
         end
     end
     return X
+end
+
+lhdm(A, B; max_iter::Integer=3*size(A,2), kwargs...) =
+    lhdm(A, B, max_iter; kwargs...)
+
+function _check_convergence(work::LHDMWorkspace, max_iter::Integer)
+    work.mode == 3 && error("LHDM failed to converge within max_iter=$max_iter")
+    return nothing
 end
 
 end # module

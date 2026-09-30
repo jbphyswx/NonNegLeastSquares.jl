@@ -71,7 +71,9 @@ All built-in public calls return a matrix, including an `n×1` matrix for a vect
 RHS. `NNLSData(A,B)` and `NNLSGram(G,C)` retain references to the supplied arrays
 without copying or factoring them. Existing numerical input restrictions and
 solver-specific keywords still apply. In particular, grouped pivoting does not
-accept `use_parallel`, and LHDM's `max_iter` keyword support remains pending.
+accept `use_parallel`. LHDM accepts `max_iter` as a nonnegative integer keyword
+and throws if the inner-loop iteration limit is exhausted. Its workspace API
+retains the partial iterate and reports exhaustion through `work.mode == 3`.
 
 ### Extending algorithms and pivot policies
 
